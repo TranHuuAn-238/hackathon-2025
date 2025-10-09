@@ -6,7 +6,9 @@ COPY package*.json ./
 
 RUN npm install
 
-CMD ["node", "index.js"]
+# CMD ["node", "index.js"]
+
+CMD ["npx", "nodemon", "index.js"]
 
 # Production, once build
 # COPY . .
