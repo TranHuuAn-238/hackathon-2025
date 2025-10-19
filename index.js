@@ -11,11 +11,18 @@ let currentDir = null;
 let moveInterval = null;
 let waitingForExplode = false;
 let escaping = false;
-let canPlaceBomb = false;
-const ESCAPE_MS = 4000;
+let explosionRange = 2;
+const forbiddenPositions = [
+  { x: 40, y: 40 },
+  { x: 565, y: 565 },
+  { x: 40, y: 565 },
+  { x: 565, y: 40 }
+];
+const ESCAPE_MS = 4900;
 const BOMB_LIFE_MS = 5000;
 const dirs = ['UP', 'DOWN', 'LEFT', 'RIGHT'];
 const botName = 'BomberBoy';
+const TILE_SIZE = 40;
 
 function randomDir() {
   return dirs[Math.floor(Math.random() * dirs.length)];
@@ -30,7 +37,9 @@ function changeDir() {
 function startMove() {
   if(moveInterval) clearInterval(moveInterval);
   moveInterval = setInterval(() => {
-    if (currentDir && !waitingForExplode) socket.emit('move', { orient: currentDir });
+    if (currentDir && !waitingForExplode) {
+      socket.emit('move', { orient: currentDir });
+    };
   }, 17);
 }
 
@@ -43,6 +52,30 @@ function scheduleChange() {
   setTimeout(() => { changeDir(); scheduleChange(); }, t);
 }
 
+function isSafe(bombX, bombY, explosionRange = 2) {
+  const explosionDistance = explosionRange * TILE_SIZE;
+
+  // Danger zone (same axis)
+  const minX = bombX - explosionDistance - TILE_SIZE;
+  const maxX = bombX + explosionDistance + TILE_SIZE;
+  const minY = bombY - explosionDistance - TILE_SIZE;
+  const maxY = bombY + explosionDistance + TILE_SIZE;
+
+  const dx = Math.abs(myPos.x - bombX);
+  const dy = Math.abs(myPos.y - bombY);
+
+  if (myPos.x < minX || myPos.x > maxX || myPos.y < minY || myPos.y > maxY) {
+    return true;
+  }
+
+  if (dx > TILE_SIZE && dy > TILE_SIZE) {
+    return true;
+  }
+
+  return false;
+}
+
+
 // Select the escape direction and run during ESCAPE_MS time
 function runEscapeFrom(bombX, bombY){
   if(escaping) return;
@@ -52,25 +85,35 @@ function runEscapeFrom(bombX, bombY){
   // simple heuristic
   const dx = myPos.x - bombX;
   const dy = myPos.y - bombY;
-
-  let escapeDir;
-  if(Math.abs(dx) >= Math.abs(dy)){
-    escapeDir = dx >= 0 ? 'RIGHT' : 'LEFT'; //
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    currentDir = dx >= 0 ? 'RIGHT' : 'LEFT';
   } else {
-    escapeDir = dy >= 0 ? 'DOWN' : 'UP'; //
+    currentDir = dy >= 0 ? 'DOWN' : 'UP';
   }
 
   // Runnn
-  currentDir = escapeDir;
   startMove();
 
-  setTimeout(() => {
+  const checkInterval = setInterval(() => {
+    if (isSafe(bombX, bombY, explosionRange)) {
+      console.log('Safe zone reached! Stopping to wait for explosion...');
+      stopMove();
+      waitingForExplode = true;
+      escaping = false;
+      clearInterval(checkInterval);
+    }
+  }, 17);
+
+  const escapeTimeout = setTimeout(() => {
+    console.log('Escape timeout, stopping anyway');
     stopMove();
     waitingForExplode = true;
     escaping = false;
-  }, ESCAPE_MS);
+    clearInterval(checkInterval);
+  }, BOMB_LIFE_MS - 100);
 }
 
+// Join
 // socket.on('connect', () => {
   socket.emit('join', {});
   console.log('Connected!');
@@ -87,10 +130,6 @@ socket.on('user', (data) => {
   currentDir = randomDir();
   startMove();
   // scheduleChange();
-
-  setTimeout(() => {
-    canPlaceBomb = true;
-  }, 5000);
 });
 
 // Production
@@ -103,13 +142,16 @@ socket.on('user', (data) => {
 socket.on('player_move', (d) => {
   if (d.uid === myUID) {
     if (myPos.x === d.x && myPos.y === d.y) {
-      // dang chay bom thi khong dat nua và item pha duoc
-      if (!waitingForExplode && canPlaceBomb) {
+      const inForbidden = forbiddenPositions.some(pos =>
+        Math.abs(pos.x - myPos.x) < 10 && Math.abs(pos.y - myPos.y) < 10
+      );
+      if (!waitingForExplode && !escaping && !inForbidden) {
         socket.emit('place_bomb');
       }
       changeDir();
     }
     myPos = { x: d.x, y: d.y };
+    explosionRange = d.explosionRange;
   }
 });
 
@@ -132,6 +174,7 @@ socket.on('bomb_explode', (bomb) => {
   if(bomb.uid === myUID && waitingForExplode){
     // resume move
     waitingForExplode = false;
+    escaping = false;
     currentDir = randomDir();
     startMove();
     // scheduleChange();
