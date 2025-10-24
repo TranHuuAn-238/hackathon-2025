@@ -12,6 +12,8 @@ let moveInterval = null;
 let waitingForExplode = false;
 let escaping = false;
 let explosionRange = 2;
+let canPlaceBomb = false;
+let lastBomb = { x: 0, y: 0 };
 const forbiddenPositions = [
   { x: 40, y: 40 },
   { x: 565, y: 565 },
@@ -72,9 +74,28 @@ function isSafe(bombX, bombY, explosionRange = 2) {
     return true;
   }
 
+  if (
+    (myPos.x > (bombX + TILE_SIZE) && myPos.y > (bombY + TILE_SIZE)) ||
+    (myPos.x < (bombX - TILE_SIZE) && myPos.y > (bombY + TILE_SIZE)) ||
+    (myPos.x > (bombX + TILE_SIZE) && myPos.y < (bombY - TILE_SIZE)) ||
+    (myPos.x < (bombX - TILE_SIZE) && myPos.y < (bombY - TILE_SIZE))
+  ) {
+    return true;
+  }
+
   return false;
 }
 
+
+function reverseDir() {
+  switch (currentDir) {
+    case 'UP': return 'DOWN';
+    case 'DOWN': return 'UP';
+    case 'LEFT': return 'RIGHT';
+    case 'RIGHT': return 'LEFT';
+    default: return currentDir;
+  }
+}
 
 // Select the escape direction and run during ESCAPE_MS time
 function runEscapeFrom(bombX, bombY){
@@ -94,22 +115,12 @@ function runEscapeFrom(bombX, bombY){
   // Runnn
   startMove();
 
-  const checkInterval = setInterval(() => {
-    if (isSafe(bombX, bombY, explosionRange)) {
-      console.log('Safe zone reached! Stopping to wait for explosion...');
+  setTimeout(() => {
+    if (escaping) {
       stopMove();
       waitingForExplode = true;
       escaping = false;
-      clearInterval(checkInterval);
     }
-  }, 17);
-
-  const escapeTimeout = setTimeout(() => {
-    console.log('Escape timeout, stopping anyway');
-    stopMove();
-    waitingForExplode = true;
-    escaping = false;
-    clearInterval(checkInterval);
   }, BOMB_LIFE_MS - 100);
 }
 
@@ -129,14 +140,18 @@ socket.on('user', (data) => {
 
   currentDir = randomDir();
   startMove();
-  // scheduleChange();
+  setTimeout(() => {
+    canPlaceBomb = true;
+  }, 5000);
 });
 
 // Production
 // socket.on('start', () => {
 //   currentDir = randomDir();
 //   startMove();
-//   scheduleChange();
+//   setTimeout(() => {
+//     canPlaceBomb = true;
+//   }, 5000);
 // });
 
 socket.on('player_move', (d) => {
@@ -145,13 +160,27 @@ socket.on('player_move', (d) => {
       const inForbidden = forbiddenPositions.some(pos =>
         Math.abs(pos.x - myPos.x) < 10 && Math.abs(pos.y - myPos.y) < 10
       );
-      if (!waitingForExplode && !escaping && !inForbidden) {
+
+      if (!waitingForExplode && !escaping && !inForbidden && canPlaceBomb) {
         socket.emit('place_bomb');
+        currentDir = reverseDir();
+        lastBomb = { x: myPos.x, y: myPos.y };
       }
       changeDir();
     }
+
+    // Update current position
     myPos = { x: d.x, y: d.y };
     explosionRange = d.explosionRange;
+
+    if (escaping) {
+      if (isSafe(lastBomb.x, lastBomb.y, explosionRange)) {
+        // Found a safe place to hide
+        stopMove();
+        waitingForExplode = true;
+        escaping = false;
+      }
+    }
   }
 });
 
@@ -159,14 +188,15 @@ socket.on('new_bomb', (bomb) => {
   if(!bomb) return;
   if(bomb.uid === myUID){
     runEscapeFrom(bomb.x, bomb.y);
-  } else {
-    const sameX = Math.abs(bomb.x - myPos.x) <= 16;
-    const sameY = Math.abs(bomb.y - myPos.y) <= 16;
-    if(sameX || sameY){
-      // runEscapeFrom(bomb.x, bomb.y);
-      changeDir();
-    }
   }
+  // else {
+  //   const sameX = Math.abs(bomb.x - myPos.x) <= 16;
+  //   const sameY = Math.abs(bomb.y - myPos.y) <= 16;
+  //   if(sameX || sameY){
+  //     // runEscapeFrom(bomb.x, bomb.y);
+  //     changeDir();
+  //   }
+  // }
 });
 
 socket.on('bomb_explode', (bomb) => {
@@ -177,6 +207,5 @@ socket.on('bomb_explode', (bomb) => {
     escaping = false;
     currentDir = randomDir();
     startMove();
-    // scheduleChange();
   }
 });
