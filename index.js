@@ -138,21 +138,21 @@ socket.on('user', (data) => {
     console.log('Founded bot:', myUID);
   }
 
+  // currentDir = randomDir();
+  // startMove();
+  // setTimeout(() => {
+  //   canPlaceBomb = true;
+  // }, 5000);
+});
+
+// Production
+socket.on('start', () => {
   currentDir = randomDir();
   startMove();
   setTimeout(() => {
     canPlaceBomb = true;
   }, 5000);
 });
-
-// Production
-// socket.on('start', () => {
-//   currentDir = randomDir();
-//   startMove();
-//   setTimeout(() => {
-//     canPlaceBomb = true;
-//   }, 5000);
-// });
 
 socket.on('player_move', (d) => {
   if (d.uid === myUID) {
